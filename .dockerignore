@@ -1,0 +1,54 @@
+# Source-control metadata
+.git
+.github
+.gitignore
+
+# Dependencies and build output
+node_modules
+.next
+.vinext
+dist
+build
+out
+coverage
+*.tsbuildinfo
+
+# Local tool state and caches
+.wrangler
+.vercel
+.cache
+.turbo
+outputs
+work
+tmp
+temp
+
+# Secrets and local configuration
+.env
+.env.*
+.npmrc
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+id_rsa*
+id_ed25519*
+
+# Databases and backups
+backups
+*.sql.gz
+*.dump
+*.backup
+*.sqlite
+*.sqlite3
+*.db
+
+# Development-only files
+tests
+*.log
+.DS_Store
+.idea
+.vscode
+README.md

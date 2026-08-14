@@ -1,0 +1,55 @@
+name: Deploy manually
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: harumal-production
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine@sha256:742f40ea20b9ff2ff31db5458d127452988a2164df9e17441e191f3b72252193
+        env:
+          POSTGRES_DB: harumal
+          POSTGRES_USER: harumal
+          POSTGRES_PASSWORD: ci-password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U harumal -d harumal"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      NODE_ENV: test
+      DATABASE_URL: postgresql://harumal:ci-password@localhost:5432/harumal
+      APP_SECRET: ci-only-app-secret-with-at-least-32-characters
+      PUBLIC_URL: http://localhost:3000
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm audit --audit-level=low
+      - run: npm test
+      - run: npm run db:migrate
+      - run: npm run test:integration
+      - run: npm run typecheck
+      - run: npm run build
+
+  deploy:
+    needs: test
+    runs-on: [self-hosted, linux, x64, harumal]
+    environment: production
+    steps:
+      - name: Deploy the persistent production checkout
+        run: cd /opt/harumal && sh scripts/deploy.sh

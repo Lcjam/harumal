@@ -1,0 +1,154 @@
+services:
+  db:
+    build:
+      context: .
+      dockerfile: ops/Postgres.Dockerfile
+    image: harumal-postgres:17.10-secure
+    restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+      - /run/postgresql:size=8m,uid=70,gid=70,mode=0775
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-harumal}
+      POSTGRES_USER: ${POSTGRES_USER:-harumal}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      TZ: Asia/Seoul
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - backend
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-harumal} -d ${POSTGRES_DB:-harumal}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  db-provision:
+    image: harumal-postgres:17.10-secure
+    restart: "no"
+    init: true
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    environment:
+      PGHOST: db
+      APP_SECRET: ${APP_SECRET:?APP_SECRET is required}
+      POSTGRES_DB: ${POSTGRES_DB:-harumal}
+      POSTGRES_USER: ${POSTGRES_USER:-harumal}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+      APP_DB_USER: ${APP_DB_USER:-harumal_app}
+    command: ["sh", "/opt/harumal/provision-app-role.sh"]
+    volumes:
+      - ./scripts/provision-app-role.sh:/opt/harumal/provision-app-role.sh:ro
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - backend
+    logging:
+      options:
+        max-size: "5m"
+        max-file: "2"
+
+  app:
+    build:
+      context: .
+      args:
+        NEXT_PUBLIC_KAKAO_JS_KEY: ${NEXT_PUBLIC_KAKAO_JS_KEY:-}
+        PUBLIC_URL: ${SITE_ADDRESS:-http://localhost}
+    restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+      - /app/.next/cache:size=64m,uid=1000,gid=1000,mode=0700
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      PUBLIC_URL: ${SITE_ADDRESS:-http://localhost}
+      APP_SECRET: ${APP_SECRET:?APP_SECRET is required}
+      APP_DB_USER: ${APP_DB_USER:-harumal_app}
+      POSTGRES_DB: ${POSTGRES_DB:-harumal}
+      DB_HOST: db
+      DB_PORT: 5432
+      TZ: Asia/Seoul
+    depends_on:
+      db-provision:
+        condition: service_completed_successfully
+    networks:
+      - backend
+      - frontend
+    expose:
+      - "3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/api/health').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    logging:
+      options:
+        max-size: "20m"
+        max-file: "5"
+
+  gateway:
+    build:
+      context: .
+      dockerfile: ops/Gateway.Dockerfile
+    image: harumal-gateway:go1.26.5
+    restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    environment:
+      SITE_ADDRESS: ${SITE_ADDRESS:-http://localhost}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - gateway_data:/data
+    depends_on:
+      app:
+        condition: service_healthy
+    networks:
+      - frontend
+    logging:
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  postgres_data:
+  gateway_data:
+
+networks:
+  backend:
+  frontend:

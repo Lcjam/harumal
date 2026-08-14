@@ -1,0 +1,13 @@
+[Unit]
+Description=Harumal PostgreSQL backup
+Requires=docker.service
+After=docker.service
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/harumal
+EnvironmentFile=/opt/harumal/.env
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ExecStart=/bin/sh /opt/harumal/scripts/backup.sh

@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily Harumal backup timer
+
+[Timer]
+OnCalendar=*-*-* 03:20:00 Asia/Seoul
+Persistent=true
+RandomizedDelaySec=300
+
+[Install]
+WantedBy=timers.target
