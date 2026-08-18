@@ -1,11 +1,29 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { compareRanking, decomposeHangul, evaluateGuess, feedbackToEmoji, validateChallengeWord } from "../lib/game.ts";
+import { compareRanking, decomposeHangul, evaluateGuess, feedbackToEmoji, validateChallengeWord, KEYBOARD_ROWS } from "../lib/game.ts";
 
 test("한글 음절을 자음과 모음으로 분해한다", () => {
   assert.deepEqual(decomposeHangul("사진"), ["ㅅ", "ㅏ", "ㅈ", "ㅣ", "ㄴ"]);
-  assert.deepEqual(decomposeHangul("꽃"), ["ㄲ", "ㅗ", "ㅊ"]);
-  assert.deepEqual(decomposeHangul("과일"), ["ㄱ", "ㅘ", "ㅇ", "ㅣ", "ㄹ"]);
+  assert.deepEqual(decomposeHangul("꽃"), ["ㄱ", "ㄱ", "ㅗ", "ㅊ"]);
+  assert.deepEqual(decomposeHangul("과일"), ["ㄱ", "ㅗ", "ㅏ", "ㅇ", "ㅣ", "ㄹ"]);
+});
+
+test("겹자모는 기본 자모 24자로 쪼갠다", () => {
+  assert.deepEqual(decomposeHangul("베개"), ["ㅂ", "ㅓ", "ㅣ", "ㄱ", "ㅏ", "ㅣ"]);
+  assert.deepEqual(decomposeHangul("의자"), ["ㅇ", "ㅡ", "ㅣ", "ㅈ", "ㅏ"]);
+  assert.deepEqual(decomposeHangul("왜"), ["ㅇ", "ㅗ", "ㅏ", "ㅣ"]);
+  assert.deepEqual(decomposeHangul("닭"), ["ㄷ", "ㅏ", "ㄹ", "ㄱ"]);
+  assert.deepEqual(decomposeHangul("값"), ["ㄱ", "ㅏ", "ㅂ", "ㅅ"]);
+});
+
+test("쪼갠 결과에는 키보드에 없는 겹자모가 남지 않는다", () => {
+  const keyboardJamo = new Set<string>(KEYBOARD_ROWS.flat().map(([, jamo]) => jamo));
+  assert.equal(keyboardJamo.size, 24);
+  for (const word of ["베개", "왜가리", "닭", "값", "꽃", "예의", "훨씬", "귀뚜라미"]) {
+    for (const unit of decomposeHangul(word)) {
+      assert.ok(keyboardJamo.has(unit), `${word}의 ${unit}이 키보드에 없습니다.`);
+    }
+  }
 });
 
 test("위치 일치, 포함, 불포함을 중복 자모 수까지 고려해 판정한다", () => {

@@ -12,7 +12,7 @@
     "start": "NODE_ENV=production node --import tsx server/index.ts",
     "typecheck": "next typegen && tsc --noEmit",
     "test": "node --import tsx --test tests/**/*.test.ts",
-    "test:integration": "RUN_INTEGRATION=1 node --import tsx --test tests/room.integration.test.ts",
+    "test:integration": "RUN_INTEGRATION=1 node --import tsx --test tests/*.integration.test.ts",
     "test:e2e": "RUN_E2E=1 node --import tsx --test tests/api.e2e.test.ts",
     "db:migrate": "node --import tsx scripts/migrate.ts",
     "db:backup": "sh scripts/backup.sh",

@@ -111,6 +111,24 @@ services:
         max-size: "20m"
         max-file: "5"
 
+  gateway-data-init:
+    image: alpine:3.24@sha256:28bd5fe8b56d1bd048e5babf5b10710ebe0bae67db86916198a6eec434943f8b
+    restart: "no"
+    user: "0:0"
+    read_only: true
+    cap_drop:
+      - ALL
+    cap_add:
+      - CHOWN
+      - DAC_OVERRIDE
+      - FOWNER
+    security_opt:
+      - no-new-privileges:true
+    command: ["sh", "-c", "chown -R 65532:65532 /data && chmod 700 /data"]
+    volumes:
+      - gateway_data:/data
+    network_mode: "none"
+
   gateway:
     build:
       context: .
@@ -138,6 +156,8 @@ services:
     depends_on:
       app:
         condition: service_healthy
+      gateway-data-init:
+        condition: service_completed_successfully
     networks:
       - frontend
     logging:

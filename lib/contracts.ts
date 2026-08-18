@@ -24,7 +24,6 @@ export type ChallengeDto = {
   id: string;
   authorMemberId: string;
   authorNickname: string;
-  hint: string;
   jamoLength: number;
   publishedAt: string;
   locked: boolean;
@@ -77,6 +76,47 @@ export type PublicRoomDto = {
   maxMembers: number;
   isMember: boolean;
   canJoin: boolean;
+};
+
+export type SoloMode = "daily" | "practice";
+export type SoloStatus = "active" | "solved" | "failed";
+
+export type SoloPlayDto = {
+  id: string;
+  mode: SoloMode;
+  playDate: string | null;
+  jamoLength: number;
+  status: SoloStatus;
+  attempts: AttemptDto[];
+  attemptsRemaining: number;
+  durationMs: number | null;
+  answer?: string;
+};
+
+export type SoloStatsDto = {
+  playedCount: number;
+  solvedCount: number;
+  currentStreak: number;
+  bestStreak: number;
+  /** 1~5번째 시도에 맞힌 횟수입니다. */
+  distribution: number[];
+};
+
+export type DailyDto = {
+  play: SoloPlayDto;
+  stats: SoloStatsDto;
+  endsAt: string;
+};
+
+export type PracticeDto = {
+  play: SoloPlayDto;
+  /** 새 단어를 받으면서 포기한 직전 문제의 정답입니다. */
+  skippedAnswer?: string;
+};
+
+export type SoloGuessResultDto = {
+  play: SoloPlayDto;
+  stats: SoloStatsDto | null;
 };
 
 export type GuessResultDto = {

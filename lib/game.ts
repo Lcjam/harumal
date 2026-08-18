@@ -4,8 +4,27 @@ const CHOSEONG = ["ㄱ", "ㄲ", "ㄴ", "ㄷ", "ㄸ", "ㄹ", "ㅁ", "ㅂ", "ㅃ",
 const JUNGSEONG = ["ㅏ", "ㅐ", "ㅑ", "ㅒ", "ㅓ", "ㅔ", "ㅕ", "ㅖ", "ㅗ", "ㅘ", "ㅙ", "ㅚ", "ㅛ", "ㅜ", "ㅝ", "ㅞ", "ㅟ", "ㅠ", "ㅡ", "ㅢ", "ㅣ"] as const;
 const JONGSEONG = ["", "ㄱ", "ㄲ", "ㄳ", "ㄴ", "ㄵ", "ㄶ", "ㄷ", "ㄹ", "ㄺ", "ㄻ", "ㄼ", "ㄽ", "ㄾ", "ㄿ", "ㅀ", "ㅁ", "ㅂ", "ㅄ", "ㅅ", "ㅆ", "ㅇ", "ㅈ", "ㅊ", "ㅋ", "ㅌ", "ㅍ", "ㅎ"] as const;
 
+/**
+ * 겹자모는 기본 자모로 쪼개서 답을 맞힙니다. 예를 들어 베개는 ㅂ ㅓ ㅣ ㄱ ㅏ ㅣ입니다.
+ * 쪼개고 나면 남는 것은 한글 기본 자모 24자뿐이고, 그게 아래 키보드와 정확히 일치합니다.
+ */
+const COMPOUND_PARTS: Record<string, string> = {
+  ㄲ: "ㄱㄱ", ㄸ: "ㄷㄷ", ㅃ: "ㅂㅂ", ㅆ: "ㅅㅅ", ㅉ: "ㅈㅈ",
+  ㄳ: "ㄱㅅ", ㄵ: "ㄴㅈ", ㄶ: "ㄴㅎ",
+  ㄺ: "ㄹㄱ", ㄻ: "ㄹㅁ", ㄼ: "ㄹㅂ", ㄽ: "ㄹㅅ", ㄾ: "ㄹㅌ", ㄿ: "ㄹㅍ", ㅀ: "ㄹㅎ",
+  ㅄ: "ㅂㅅ",
+  ㅐ: "ㅏㅣ", ㅒ: "ㅑㅣ", ㅔ: "ㅓㅣ", ㅖ: "ㅕㅣ",
+  ㅘ: "ㅗㅏ", ㅙ: "ㅗㅏㅣ", ㅚ: "ㅗㅣ",
+  ㅝ: "ㅜㅓ", ㅞ: "ㅜㅓㅣ", ㅟ: "ㅜㅣ", ㅢ: "ㅡㅣ",
+};
+
+function toBasicJamo(jamo: string): string[] {
+  const parts = COMPOUND_PARTS[jamo];
+  return parts ? Array.from(parts) : [jamo];
+}
+
 export const KEYBOARD_ROWS = [
-  [["Q", "ㅂ"], ["W", "ㅈ"], ["E", "ㄷ"], ["R", "ㄱ"], ["T", "ㅅ"], ["Y", "ㅛ"], ["U", "ㅕ"], ["I", "ㅑ"], ["O", "ㅐ"], ["P", "ㅔ"]],
+  [["Q", "ㅂ"], ["W", "ㅈ"], ["E", "ㄷ"], ["R", "ㄱ"], ["T", "ㅅ"], ["Y", "ㅛ"], ["U", "ㅕ"], ["I", "ㅑ"]],
   [["A", "ㅁ"], ["S", "ㄴ"], ["D", "ㅇ"], ["F", "ㄹ"], ["G", "ㅎ"], ["H", "ㅗ"], ["J", "ㅓ"], ["K", "ㅏ"], ["L", "ㅣ"]],
   [["Z", "ㅋ"], ["X", "ㅌ"], ["C", "ㅊ"], ["V", "ㅍ"], ["B", "ㅠ"], ["N", "ㅜ"], ["M", "ㅡ"]],
 ] as const;
@@ -28,10 +47,10 @@ export function decomposeHangul(value: string): string[] {
       const initial = Math.floor(offset / 588);
       const medial = Math.floor((offset % 588) / 28);
       const final = offset % 28;
-      units.push(CHOSEONG[initial], JUNGSEONG[medial]);
-      if (JONGSEONG[final]) units.push(JONGSEONG[final]);
+      units.push(...toBasicJamo(CHOSEONG[initial]), ...toBasicJamo(JUNGSEONG[medial]));
+      if (JONGSEONG[final]) units.push(...toBasicJamo(JONGSEONG[final]));
     } else if (/[ㄱ-ㅎㅏ-ㅣ]/u.test(character)) {
-      units.push(character);
+      units.push(...toBasicJamo(character));
     }
   }
   return units;

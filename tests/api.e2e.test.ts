@@ -52,11 +52,11 @@ test("HTTP cookies and Socket.IO complete a two-player game", { skip: !enabled, 
         Origin: "https://evil.example",
         "Sec-Fetch-Site": "cross-site",
       },
-      body: JSON.stringify({ nickname: "차단대상" }),
+      body: JSON.stringify({ nickname: "차단대상", pin: "1234" }),
     });
     assert.equal(blockedCrossSiteResponse.status, 403);
 
-    const created = await api<{ code: string }>("/api/rooms", { method: "POST", body: { nickname: "HTTP출제자" } });
+    const created = await api<{ code: string }>("/api/rooms", { method: "POST", body: { nickname: "HTTP출제자", pin: "1234" } });
     assert.equal(created.status, 201);
     assert.ok(created.cookie.includes("harumal_device="));
     const setCookie = created.headers.get("set-cookie") ?? "";
@@ -65,7 +65,15 @@ test("HTTP cookies and Socket.IO complete a two-player game", { skip: !enabled, 
     assert.match(setCookie, /Max-Age=2592000/i);
     code = created.data.code;
 
-    const joined = await api<{ code: string }>(`/api/rooms/${code}/join`, { method: "POST", body: { nickname: "소켓친구" } });
+    const daily = await api<{ play: { mode: string; playDate: string | null; answer?: string } }>("/api/daily", {
+      cookie: created.cookie,
+    });
+    assert.equal(daily.status, 200);
+    assert.equal(daily.data.play.mode, "daily");
+    assert.ok(daily.data.play.playDate);
+    assert.equal(daily.data.play.answer, undefined);
+
+    const joined = await api<{ code: string }>(`/api/rooms/${code}/join`, { method: "POST", body: { nickname: "소켓친구", pin: "5678" } });
     assert.equal(joined.status, 201);
     assert.ok(joined.cookie.includes("harumal_device="));
 
@@ -113,7 +121,7 @@ test("HTTP cookies and Socket.IO complete a two-player game", { skip: !enabled, 
     const published = await api<{ challengeId: string }>(`/api/rooms/${code}/challenge`, {
       method: "PUT",
       cookie: created.cookie,
-      body: { answer: "사진", hint: "추억을 남기는 것" },
+      body: { answer: "사진" },
     });
     assert.equal(published.status, 201);
     assert.equal((await update).event, "challenge:published");

@@ -47,14 +47,14 @@ test("daily room flow keeps answers private and enforces multiplayer rules", { s
     );
 
     for (let index = 1; index < 6; index += 1) {
-      await joinRoom(code, anonymousIds[index], `친구${index}`);
+      await joinRoom(code, anonymousIds[index], `친구${index}`, "1234");
     }
-    await assert.rejects(joinRoom(code, anonymousIds[6], "일곱째"), expectAppError("ROOM_FULL"));
+    await assert.rejects(joinRoom(code, anonymousIds[6], "일곱째", "1234"), expectAppError("ROOM_FULL"));
     assert.equal((await getPublicRoom(code, anonymousIds[0])).memberCount, 6);
 
-    const firstChallenge = await publishChallenge(code, anonymousIds[0], "사진", "추억을 남기는 것");
-    await publishChallenge(code, anonymousIds[1], "우산", "비가 올 때 필요해요");
-    const thirdChallenge = await publishChallenge(code, anonymousIds[2], "바다", "파도가 치는 넓은 곳");
+    const firstChallenge = await publishChallenge(code, anonymousIds[0], "사진");
+    await publishChallenge(code, anonymousIds[1], "우산");
+    const thirdChallenge = await publishChallenge(code, anonymousIds[2], "바다");
 
     await assert.rejects(startPlay(firstChallenge.challengeId, anonymousIds[0]), expectAppError("OWN_CHALLENGE"));
     const play = await startPlay(firstChallenge.challengeId, anonymousIds[1]);

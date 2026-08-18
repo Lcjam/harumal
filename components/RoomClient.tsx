@@ -4,11 +4,10 @@ import { FormEvent, useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { io, type Socket } from "socket.io-client";
 import type { ChallengeDto, PublicRoomDto, RoomSnapshotDto } from "@/lib/contracts";
-import { decomposeHangul, feedbackToEmoji, type FeedbackState } from "@/lib/game";
+import { decomposeHangul, feedbackToEmoji } from "@/lib/game";
 import { apiFetch, ClientApiError } from "@/lib/client-api";
 import { Brand } from "./Brand";
-import { HangulKeyboard } from "./HangulKeyboard";
-import { JamoBoard } from "./JamoBoard";
+import { PuzzlePad } from "./PuzzlePad";
 
 const KAKAO_KEY = process.env.NEXT_PUBLIC_KAKAO_JS_KEY ?? "";
 
@@ -46,11 +45,10 @@ export function RoomClient({ code }: { code: string }) {
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [nickname, setNickname] = useState("");
+  const [pin, setPin] = useState("");
   const [answer, setAnswer] = useState("");
-  const [hint, setHint] = useState("");
   const [savingChallenge, setSavingChallenge] = useState(false);
   const [activeChallengeId, setActiveChallengeId] = useState<string | null>(null);
-  const [guess, setGuess] = useState("");
   const [guessError, setGuessError] = useState("");
   const [submittingGuess, setSubmittingGuess] = useState(false);
   const [now, setNow] = useState(() => Date.now());
@@ -105,8 +103,7 @@ export function RoomClient({ code }: { code: string }) {
   useEffect(() => {
     if (!ownChallenge) return;
     setAnswer(ownChallenge.ownAnswer ?? "");
-    setHint(ownChallenge.hint);
-  }, [ownChallenge?.id, ownChallenge?.ownAnswer, ownChallenge?.hint]);
+  }, [ownChallenge?.id, ownChallenge?.ownAnswer]);
 
   const activeChallenge = room?.challenges.find((challenge) => challenge.id === activeChallengeId) ?? null;
 
@@ -116,8 +113,14 @@ export function RoomClient({ code }: { code: string }) {
     try {
       const cleanNickname = nickname.trim();
       if (!cleanNickname) throw new Error("닉네임을 입력해 주세요.");
-      await apiFetch(`/api/rooms/${code}/join`, { method: "POST", body: JSON.stringify({ nickname: cleanNickname }) });
+      if (!/^\d{4}$/.test(pin)) throw new Error("재입장 비밀번호를 숫자 4자리로 입력해 주세요.");
+      const joined = await apiFetch<{ resumed?: boolean }>(`/api/rooms/${code}/join`, {
+        method: "POST",
+        body: JSON.stringify({ nickname: cleanNickname, pin }),
+      });
       window.localStorage.setItem("harumal_nickname", cleanNickname);
+      setPin("");
+      if (joined.resumed) setNotice("이전에 쓰던 자리를 이어받았어요. 예전 창에서는 로그아웃됩니다.");
       await loadRoom();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "방에 참가하지 못했습니다.");
@@ -131,7 +134,7 @@ export function RoomClient({ code }: { code: string }) {
     try {
       await apiFetch(`/api/rooms/${code}/challenge`, {
         method: "PUT",
-        body: JSON.stringify({ answer, hint }),
+        body: JSON.stringify({ answer }),
       });
       setNotice(ownChallenge ? "문제를 수정했습니다." : "내 문제가 친구들에게 공개됐습니다!");
       await loadRoom(true);
@@ -144,7 +147,6 @@ export function RoomClient({ code }: { code: string }) {
 
   async function openChallenge(challenge: ChallengeDto) {
     setError("");
-    setGuess("");
     setGuessError("");
     if (!challenge.play) {
       try {
@@ -158,9 +160,8 @@ export function RoomClient({ code }: { code: string }) {
     setActiveChallengeId(challenge.id);
   }
 
-  async function submitCurrentGuess(event?: FormEvent) {
-    event?.preventDefault();
-    if (!activeChallenge?.play || activeChallenge.play.status !== "active" || !guess.trim()) return;
+  async function submitCurrentGuess(guess: string) {
+    if (!activeChallenge?.play || activeChallenge.play.status !== "active") return;
     setSubmittingGuess(true);
     setGuessError("");
     try {
@@ -168,7 +169,6 @@ export function RoomClient({ code }: { code: string }) {
         method: "POST",
         body: JSON.stringify({ guess }),
       });
-      setGuess("");
       if (result.status === "solved") setNotice("정답입니다! 결과를 카카오톡으로 공유해 보세요.");
       else if (result.status === "failed") setNotice("다섯 번의 도전이 끝났습니다. 다음 문제에 도전해 보세요.");
       await loadRoom(true);
@@ -226,19 +226,6 @@ export function RoomClient({ code }: { code: string }) {
     }
   }
 
-  const keyboardStates = useMemo(() => {
-    const states = new Map<string, FeedbackState>();
-    const priority: Record<FeedbackState, number> = { absent: 1, present: 2, correct: 3 };
-    activeChallenge?.play?.attempts.forEach((attempt) => {
-      attempt.units.forEach((unit, index) => {
-        const next = attempt.feedback[index];
-        const current = states.get(unit);
-        if (!current || priority[next] > priority[current]) states.set(unit, next);
-      });
-    });
-    return states;
-  }, [activeChallenge]);
-
   if (loading) {
     return <main className="loadingPage"><Brand /><div className="loadingMark">ㅎ</div><p>오늘의 방을 불러오는 중…</p></main>;
   }
@@ -261,6 +248,18 @@ export function RoomClient({ code }: { code: string }) {
             <form onSubmit={join}>
               <label htmlFor="join-nickname">내 닉네임</label>
               <input id="join-nickname" value={nickname} onChange={(event) => setNickname(event.target.value.slice(0, 12))} placeholder="예: 단어왕민지" autoFocus />
+              <label htmlFor="join-pin">재입장 비밀번호 <em>숫자 4자리</em></label>
+              <input
+                id="join-pin"
+                className="pinInput"
+                value={pin}
+                onChange={(event) => setPin(event.target.value.replace(/\D/g, "").slice(0, 4))}
+                placeholder="0000"
+                inputMode="numeric"
+                autoComplete="off"
+                maxLength={4}
+              />
+              <p className="fieldHelp">이미 이 방에 참가한 적이 있다면, 그때 쓴 닉네임과 비밀번호를 넣으면 그 자리로 돌아옵니다.</p>
               {error && <p className="formError" role="alert">{error}</p>}
               <button className="primaryButton wide" type="submit"><span>이 방에 참가하기</span><b>→</b></button>
             </form>
@@ -279,7 +278,6 @@ export function RoomClient({ code }: { code: string }) {
   const joinClosed = now >= new Date(room.joinCutoffAt).getTime();
   const ended = room.status === "ended" || now >= new Date(room.endAt).getTime();
   const answerUnits = decomposeHangul(answer);
-  const typedUnits = decomposeHangul(guess);
 
   return (
     <main className="roomPage">
@@ -314,8 +312,7 @@ export function RoomClient({ code }: { code: string }) {
                 <form className="challengeForm" onSubmit={saveChallenge}>
                   <label htmlFor="answer">정답</label>
                   <div className="answerInputLine"><input id="answer" value={answer} onChange={(event) => setAnswer(event.target.value.replace(/\s/g, "").slice(0, 12))} placeholder="예: 사진" maxLength={12} /><div>{answerUnits.map((unit, index) => <b key={`${unit}-${index}`}>{unit}</b>)}</div></div>
-                  <label htmlFor="hint">힌트</label>
-                  <input id="hint" value={hint} onChange={(event) => setHint(event.target.value.slice(0, 60))} placeholder="기억하고 싶은 순간을 남기는 것" />
+                  <p className="fieldHelp">힌트가 없으니 사전에 있는 단어만 낼 수 있어요. 친구들은 자모 개수와 색 단서만으로 추리합니다.</p>
                   {error && <p className="formError" role="alert">{error}</p>}
                   <button className="secondaryButton" type="submit" disabled={savingChallenge}>{savingChallenge ? "저장 중…" : ownChallenge ? "문제 수정하기" : "문제 공개하기 →"}</button>
                 </form>
@@ -336,7 +333,9 @@ export function RoomClient({ code }: { code: string }) {
                   <article className={`challengeCard ${status.tone}`} key={challenge.id}>
                     <div className="challengeNumber">{String(index + 1).padStart(2, "0")}</div>
                     <div className="challengeOwner"><span>{challenge.authorNickname.slice(0, 1)}</span><div><b>{challenge.authorNickname}의 문제</b><small>{challenge.jamoLength}개 자모</small></div></div>
-                    <p>“{challenge.hint}”</p>
+                    <p className="challengeShape" aria-label={`자모 ${challenge.jamoLength}칸`}>
+                      {Array.from({ length: challenge.jamoLength }, (_, slot) => <i key={slot} />)}
+                    </p>
                     <div className="challengeMeta"><span>{status.label}</span><small>{challenge.solvedCount}/{Math.max(1, room.memberCount - 1)}명 정답</small></div>
                     <button onClick={() => void openChallenge(challenge)} disabled={ended || challenge.play?.status === "expired"}>
                       {challenge.play?.status === "solved" || challenge.play?.status === "failed" ? "결과 보기" : challenge.play ? "계속 풀기" : "도전하기"} <b>→</b>
@@ -381,27 +380,23 @@ export function RoomClient({ code }: { code: string }) {
         <div className="puzzleBackdrop" role="presentation">
           <section className="puzzlePanel" role="dialog" aria-modal="true" aria-labelledby="puzzle-title">
             <header>
-              <button onClick={() => { setActiveChallengeId(null); setGuess(""); }} aria-label="문제 닫기">← <span>방으로</span></button>
+              <button onClick={() => { setActiveChallengeId(null); }} aria-label="문제 닫기">← <span>방으로</span></button>
               <div><small>{activeChallenge.authorNickname}의 문제</small><b>{activeChallenge.play.attempts.length} / 5</b></div>
               <span>{activeChallenge.play.status === "active" ? "도전 중" : activeChallenge.play.status === "solved" ? "정답 성공" : "도전 종료"}</span>
             </header>
 
             <div className="puzzleBody">
-              <div className="puzzleHeading"><span>오늘의 힌트</span><h2 id="puzzle-title">“{activeChallenge.hint}”</h2><p>자모 {activeChallenge.jamoLength}칸 · 기회는 다섯 번</p></div>
-              <JamoBoard attempts={activeChallenge.play.attempts} length={activeChallenge.jamoLength} />
+              <div className="puzzleHeading"><span>{activeChallenge.authorNickname}의 문제</span><h2 id="puzzle-title">자모 {activeChallenge.jamoLength}칸</h2><p>힌트 없이 색 단서만으로 · 기회는 다섯 번</p></div>
+              <PuzzlePad
+                attempts={activeChallenge.play.attempts}
+                length={activeChallenge.jamoLength}
+                active={activeChallenge.play.status === "active"}
+                submitting={submittingGuess}
+                error={guessError}
+                onSubmit={(guess) => void submitCurrentGuess(guess)}
+              />
 
-              {activeChallenge.play.status === "active" ? (
-                <>
-                  <form className="guessForm" onSubmit={(event) => void submitCurrentGuess(event)}>
-                    <label className="srOnly" htmlFor="guess">정답 추측</label>
-                    <input id="guess" value={guess} onChange={(event) => setGuess(event.target.value.replace(/\s/g, "").slice(0, 12))} placeholder="한글 단어 입력" maxLength={12} autoComplete="off" autoFocus />
-                    <button type="submit" disabled={submittingGuess || !guess.trim()}>{submittingGuess ? "…" : "확인 ↵"}</button>
-                  </form>
-                  <div className="typedDecomposition"><span>{guess || "입력한 단어"}</span><i>→</i><div>{typedUnits.length ? typedUnits.map((unit, index) => <b key={`${unit}-${index}`}>{unit}</b>) : <small>자모로 분해됩니다</small>}</div></div>
-                  {guessError && <p className="guessError" role="alert">{guessError}</p>}
-                  <HangulKeyboard states={keyboardStates} />
-                </>
-              ) : (
+              {activeChallenge.play.status !== "active" && (
                 <div className={`puzzleResult ${activeChallenge.play.status}`}>
                   <span>{activeChallenge.play.status === "solved" ? "♛" : "!"}</span>
                   <div><small>정답</small><h3>{activeChallenge.play.answer}</h3><p>{activeChallenge.play.status === "solved" ? `${activeChallenge.play.attempts.length}번째 시도 · ${durationText(activeChallenge.play.durationMs)}` : "다섯 번의 도전 끝에 공개됐어요."}</p></div>

@@ -14,13 +14,15 @@ import {
   startPlay,
   submitGuess,
 } from "./room-service.ts";
+import { getDaily, getPractice, nextPractice, submitSoloGuess } from "./solo-service.ts";
 
 type RoomNotifier = (sessionId: string, event: string) => void;
 
-const nicknameSchema = z.object({ nickname: z.string().min(1).max(20) });
-const challengeSchema = z.object({ answer: z.string().min(1).max(24), hint: z.string().min(2).max(80) });
+const nicknameSchema = z.object({ nickname: z.string().min(1).max(20), pin: z.string().min(1).max(8) });
+const challengeSchema = z.object({ answer: z.string().min(1).max(24) });
 const guessSchema = z.object({ guess: z.string().min(1).max(24) });
 const codeSchema = z.string().regex(/^[2-9A-HJ-NP-Z]{6}$/);
+const playIdSchema = z.uuid();
 const rateLimitMessage = { error: { code: "RATE_LIMITED", message: "요청이 너무 많습니다. 잠시 후 다시 시도해 주세요." } };
 
 const createRoomRateLimit = rateLimit({
@@ -33,6 +35,14 @@ const createRoomRateLimit = rateLimit({
 
 const joinRoomRateLimit = rateLimit({
   windowMs: 15 * 60_000,
+  limit: 30,
+  standardHeaders: "draft-8",
+  legacyHeaders: false,
+  message: rateLimitMessage,
+});
+
+const practiceRateLimit = rateLimit({
+  windowMs: 60_000,
   limit: 30,
   standardHeaders: "draft-8",
   legacyHeaders: false,
@@ -85,10 +95,33 @@ export function createApiRouter(notifyRoom: RoomNotifier): Router {
     response.json({ status: "ok", time: new Date().toISOString() });
   }));
 
+  router.get("/daily", asyncRoute(async (request, response) => {
+    const anonymousSessionId = await ensureAnonymousSession(request, response);
+    response.json(await getDaily(anonymousSessionId));
+  }));
+
+  router.post("/practice", practiceRateLimit, asyncRoute(async (request, response) => {
+    const anonymousSessionId = await ensureAnonymousSession(request, response);
+    response.status(201).json(await getPractice(anonymousSessionId));
+  }));
+
+  router.post("/practice/next", practiceRateLimit, asyncRoute(async (request, response) => {
+    const anonymousSessionId = await ensureAnonymousSession(request, response);
+    response.status(201).json(await nextPractice(anonymousSessionId));
+  }));
+
+  router.post("/solo/plays/:playId/guesses", asyncRoute(async (request, response) => {
+    const body = guessSchema.parse(request.body);
+    const playId = playIdSchema.parse(routeParam(request.params.playId));
+    const anonymousSessionId = await findAnonymousSessionId(request);
+    if (!anonymousSessionId) throw new AppError(403, "NO_DEVICE_SESSION", "문제를 다시 불러온 뒤 시도해 주세요.");
+    response.status(201).json(await submitSoloGuess(playId, anonymousSessionId, body.guess));
+  }));
+
   router.post("/rooms", createRoomRateLimit, asyncRoute(async (request, response) => {
     const body = nicknameSchema.parse(request.body);
     const anonymousSessionId = await ensureAnonymousSession(request, response);
-    const code = await createRoom(anonymousSessionId, body.nickname);
+    const code = await createRoom(anonymousSessionId, body.nickname, body.pin);
     response.status(201).json({ code });
   }));
 
@@ -102,9 +135,9 @@ export function createApiRouter(notifyRoom: RoomNotifier): Router {
     const code = codeSchema.parse(routeParam(request.params.code).toUpperCase());
     const body = nicknameSchema.parse(request.body);
     const anonymousSessionId = await ensureAnonymousSession(request, response);
-    const joined = await joinRoom(code, anonymousSessionId, body.nickname);
-    notifyRoom(joined.sessionId, "member:joined");
-    response.status(201).json({ code });
+    const joined = await joinRoom(code, anonymousSessionId, body.nickname, body.pin);
+    notifyRoom(joined.sessionId, joined.resumed ? "member:resumed" : "member:joined");
+    response.status(201).json({ code, resumed: joined.resumed });
   }));
 
   router.get("/rooms/:code", asyncRoute(async (request, response) => {
@@ -119,7 +152,7 @@ export function createApiRouter(notifyRoom: RoomNotifier): Router {
     const body = challengeSchema.parse(request.body);
     const anonymousSessionId = await findAnonymousSessionId(request);
     if (!anonymousSessionId) throw new AppError(403, "NOT_A_MEMBER", "먼저 이 방에 참가해 주세요.");
-    const published = await publishChallenge(code, anonymousSessionId, body.answer, body.hint);
+    const published = await publishChallenge(code, anonymousSessionId, body.answer);
     notifyRoom(published.sessionId, "challenge:published");
     response.status(201).json({ challengeId: published.challengeId });
   }));

@@ -44,7 +44,11 @@ export async function ensureAnonymousSession(request: Request, response: Respons
       "UPDATE anonymous_sessions SET last_seen_at = NOW() WHERE token_hash = $1 RETURNING id",
       [hashValue(existingToken)],
     );
-    if (result.rows[0]) return result.rows[0].id;
+    if (result.rows[0]) {
+      // 만료일을 다시 밀어 줘야 매일 들어오는 사람의 연속 기록이 30일에서 끊기지 않습니다.
+      setDeviceCookie(response, existingToken);
+      return result.rows[0].id;
+    }
   }
 
   const token = randomBytes(32).toString("base64url");

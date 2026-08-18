@@ -1,8 +1,10 @@
 import { randomBytes } from "node:crypto";
 import type { PoolClient, QueryResult, QueryResultRow } from "pg";
 import type { ChallengeDto, GuessResultDto, LeaderboardEntryDto, MemberDto, PublicRoomDto, RoomSnapshotDto } from "../lib/contracts.ts";
-import { compareRanking, decomposeHangul, evaluateGuess, isCorrectFeedback, normalizeWord, validateChallengeWord } from "../lib/game.ts";
-import { decryptValue, encryptValue } from "./crypto.ts";
+import { compareRanking, decomposeHangul, evaluateGuess, isCorrectFeedback, validateChallengeWord } from "../lib/game.ts";
+import { decryptValue, encryptValue, hashPin, verifyPin } from "./crypto.ts";
+import { resolveGuess } from "./guess.ts";
+import { isDictionaryWord } from "./words.ts";
 import { pool, withTransaction } from "./db.ts";
 import { AppError, isPostgresUniqueViolation } from "./errors.ts";
 import { dailyBoundaries, effectiveStatus } from "./time.ts";
@@ -23,6 +25,8 @@ type SessionRow = {
 
 const CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
 const MAX_MEMBERS = 6;
+const PIN_MAX_FAILURES = 5;
+const PIN_LOCK_MINUTES = 10;
 
 function makeCode(): string {
   const bytes = randomBytes(6);
@@ -34,6 +38,12 @@ function normalizeNickname(value: string): string {
   if (nickname.length < 1 || nickname.length > 12) throw new AppError(400, "INVALID_NICKNAME", "닉네임은 1~12자로 입력해 주세요.");
   if (/[^가-힣ㄱ-ㅎㅏ-ㅣa-zA-Z0-9 _-]/u.test(nickname)) throw new AppError(400, "INVALID_NICKNAME", "닉네임에 사용할 수 없는 문자가 있습니다.");
   return nickname;
+}
+
+function normalizePin(value: string): string {
+  const pin = value.trim();
+  if (!/^\d{4}$/.test(pin)) throw new AppError(400, "INVALID_PIN", "재입장 비밀번호는 숫자 4자리로 입력해 주세요.");
+  return pin;
 }
 
 async function getSessionByCode(database: Queryable, code: string, lock = false): Promise<SessionRow> {
@@ -61,8 +71,9 @@ function assertActive(session: SessionRow): void {
   }
 }
 
-export async function createRoom(anonymousSessionId: string, nicknameInput: string): Promise<string> {
+export async function createRoom(anonymousSessionId: string, nicknameInput: string, pinInput: string): Promise<string> {
   const nickname = normalizeNickname(nicknameInput);
+  const pinHash = await hashPin(normalizePin(pinInput));
   const boundaries = dailyBoundaries();
   if (Date.now() >= boundaries.joinCutoffAt.getTime()) throw new AppError(409, "JOIN_CLOSED", "오늘의 방 생성은 23시 59분에 마감되었습니다.");
 
@@ -76,9 +87,9 @@ export async function createRoom(anonymousSessionId: string, nicknameInput: stri
           [code, boundaries.playDate, boundaries.joinCutoffAt, boundaries.endAt],
         );
         await client.query(
-          `INSERT INTO members (daily_session_id, anonymous_session_id, nickname)
-           VALUES ($1, $2, $3)`,
-          [session.rows[0].id, anonymousSessionId, nickname],
+          `INSERT INTO members (daily_session_id, anonymous_session_id, nickname, pin_hash)
+           VALUES ($1, $2, $3, $4)`,
+          [session.rows[0].id, anonymousSessionId, nickname, pinHash],
         );
       });
       return code;
@@ -90,9 +101,22 @@ export async function createRoom(anonymousSessionId: string, nicknameInput: stri
   throw new AppError(503, "CODE_EXHAUSTED", "초대코드를 만들지 못했습니다. 잠시 후 다시 시도해 주세요.");
 }
 
-export async function joinRoom(code: string, anonymousSessionId: string, nicknameInput: string): Promise<{ sessionId: string; memberId: string }> {
+export async function joinRoom(
+  code: string,
+  anonymousSessionId: string,
+  nicknameInput: string,
+  pinInput: string,
+): Promise<{ sessionId: string; memberId: string; resumed: boolean }> {
   const nickname = normalizeNickname(nicknameInput);
-  return withTransaction(async (client) => {
+  const pin = normalizePin(pinInput);
+  // 새로 참가하는 경우에 대비해 트랜잭션 밖에서 미리 해싱해 둡니다. scrypt는 느립니다.
+  const pinHash = await hashPin(pin);
+
+  type JoinOutcome =
+    | { kind: "ok"; sessionId: string; memberId: string; resumed: boolean }
+    | { kind: "wrong_pin"; memberId: string };
+
+  const outcome = await withTransaction<JoinOutcome>(async (client) => {
     const session = await getSessionByCode(client, code, true);
     assertActive(session);
 
@@ -100,7 +124,35 @@ export async function joinRoom(code: string, anonymousSessionId: string, nicknam
       "SELECT id FROM members WHERE daily_session_id = $1 AND anonymous_session_id = $2",
       [session.id, anonymousSessionId],
     );
-    if (existing.rows[0]) return { sessionId: session.id, memberId: existing.rows[0].id };
+    if (existing.rows[0]) return { kind: "ok", sessionId: session.id, memberId: existing.rows[0].id, resumed: false };
+
+    const claimed = await client.query<{
+      id: string; pin_hash: string | null; pin_failed_count: number; pin_locked_until: Date | null;
+    }>(
+      `SELECT id, pin_hash, pin_failed_count, pin_locked_until FROM members
+       WHERE daily_session_id = $1 AND LOWER(nickname) = LOWER($2) FOR UPDATE`,
+      [session.id, nickname],
+    );
+
+    // 같은 닉네임의 자리가 이미 있으면, 비밀번호로 본인을 확인하고 그 자리를 새 기기로 옮깁니다.
+    const seat = claimed.rows[0];
+    if (seat) {
+      if (!seat.pin_hash) {
+        throw new AppError(409, "NICKNAME_TAKEN", "이미 사용 중인 닉네임입니다. 다른 닉네임으로 참가해 주세요.");
+      }
+      if (seat.pin_locked_until && seat.pin_locked_until.getTime() > Date.now()) {
+        throw new AppError(429, "PIN_LOCKED", "비밀번호를 여러 번 틀렸습니다. 10분 뒤에 다시 시도해 주세요.");
+      }
+      // 실패 횟수는 트랜잭션이 롤백돼도 남아야 하므로, 커밋한 뒤에 따로 기록합니다.
+      if (!(await verifyPin(pin, seat.pin_hash))) return { kind: "wrong_pin", memberId: seat.id };
+
+      await client.query(
+        "UPDATE members SET anonymous_session_id = $2, pin_failed_count = 0, pin_locked_until = NULL WHERE id = $1",
+        [seat.id, anonymousSessionId],
+      );
+      return { kind: "ok", sessionId: session.id, memberId: seat.id, resumed: true };
+    }
+
     if (Date.now() >= session.join_cutoff_at.getTime()) throw new AppError(409, "JOIN_CLOSED", "이 방의 참가가 마감되었습니다.");
 
     const count = await client.query<{ count: string }>("SELECT COUNT(*)::text AS count FROM members WHERE daily_session_id = $1", [session.id]);
@@ -108,15 +160,30 @@ export async function joinRoom(code: string, anonymousSessionId: string, nicknam
 
     try {
       const member = await client.query<{ id: string }>(
-        "INSERT INTO members (daily_session_id, anonymous_session_id, nickname) VALUES ($1, $2, $3) RETURNING id",
-        [session.id, anonymousSessionId, nickname],
+        "INSERT INTO members (daily_session_id, anonymous_session_id, nickname, pin_hash) VALUES ($1, $2, $3, $4) RETURNING id",
+        [session.id, anonymousSessionId, nickname, pinHash],
       );
-      return { sessionId: session.id, memberId: member.rows[0].id };
+      return { kind: "ok", sessionId: session.id, memberId: member.rows[0].id, resumed: false };
     } catch (error) {
       if (isPostgresUniqueViolation(error)) throw new AppError(409, "NICKNAME_TAKEN", "이미 사용 중인 닉네임입니다.");
       throw error;
     }
   });
+
+  if (outcome.kind === "wrong_pin") {
+    await pool.query(
+      `UPDATE members
+       SET pin_failed_count = pin_failed_count + 1,
+           pin_locked_until = CASE WHEN pin_failed_count + 1 >= $2
+                                   THEN NOW() + make_interval(mins => $3)
+                                   ELSE pin_locked_until END
+       WHERE id = $1`,
+      [outcome.memberId, PIN_MAX_FAILURES, PIN_LOCK_MINUTES],
+    );
+    throw new AppError(403, "WRONG_PIN", "닉네임은 있지만 비밀번호가 다릅니다.");
+  }
+
+  return { sessionId: outcome.sessionId, memberId: outcome.memberId, resumed: outcome.resumed };
 }
 
 export async function getPublicRoom(code: string, anonymousSessionId: string | null): Promise<PublicRoomDto> {
@@ -147,7 +214,6 @@ export async function publishChallenge(
   code: string,
   anonymousSessionId: string,
   answerInput: string,
-  hintInput: string,
 ): Promise<{ sessionId: string; challengeId: string }> {
   let validated: ReturnType<typeof validateChallengeWord>;
   try {
@@ -156,9 +222,9 @@ export async function publishChallenge(
     throw new AppError(400, "INVALID_ANSWER", error instanceof Error ? error.message : "정답을 확인해 주세요.");
   }
   const { normalized, units } = validated;
-  const hint = hintInput.trim().replace(/\s+/g, " ");
-  if (hint.length < 2 || hint.length > 60) throw new AppError(400, "INVALID_HINT", "힌트는 2~60자로 입력해 주세요.");
-  if (hint.includes(normalized)) throw new AppError(400, "ANSWER_IN_HINT", "힌트에 정답을 직접 포함할 수 없습니다.");
+  if (!isDictionaryWord(normalized)) {
+    throw new AppError(400, "NOT_IN_DICTIONARY", "사전에 없는 단어예요. 힌트가 없으니 사전에 있는 단어로 내 주세요.");
+  }
   const encrypted = encryptValue(normalized);
 
   return withTransaction(async (client) => {
@@ -170,18 +236,17 @@ export async function publishChallenge(
     const result = await client.query<{ id: string }>(
       `INSERT INTO challenges (
          daily_session_id, author_member_id, answer_ciphertext, answer_iv, answer_tag,
-         jamo_length, hint
-       ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+         jamo_length
+       ) VALUES ($1, $2, $3, $4, $5, $6)
        ON CONFLICT (daily_session_id, author_member_id) DO UPDATE SET
          answer_ciphertext = EXCLUDED.answer_ciphertext,
          answer_iv = EXCLUDED.answer_iv,
          answer_tag = EXCLUDED.answer_tag,
          jamo_length = EXCLUDED.jamo_length,
-         hint = EXCLUDED.hint,
          updated_at = NOW()
        WHERE challenges.locked_at IS NULL
        RETURNING id`,
-      [session.id, member.id, encrypted.ciphertext, encrypted.iv, encrypted.tag, units.length, hint],
+      [session.id, member.id, encrypted.ciphertext, encrypted.iv, encrypted.tag, units.length],
     );
     if (!result.rows[0]) throw new AppError(409, "CHALLENGE_LOCKED", "다른 친구가 풀이를 시작해 문제를 수정할 수 없습니다.");
     return { sessionId: session.id, challengeId: result.rows[0].id };
@@ -254,11 +319,7 @@ export async function submitGuess(playId: string, anonymousSessionId: string, gu
     if (play.status !== "active") throw new AppError(409, "PLAY_FINISHED", "이미 끝난 문제입니다.");
 
     const answer = decryptValue({ ciphertext: play.answer_ciphertext, iv: play.answer_iv, tag: play.answer_tag });
-    const guess = normalizeWord(guessInput);
-    if (!guess || !/^[가-힣]+$/u.test(guess)) throw new AppError(400, "INVALID_GUESS", "완성된 한글 단어를 입력해 주세요.");
-    if (decomposeHangul(guess).length !== play.jamo_length) {
-      throw new AppError(400, "WRONG_JAMO_LENGTH", `자모 ${play.jamo_length}개로 이루어진 단어를 입력해 주세요.`);
-    }
+    const guess = resolveGuess(guessInput, decomposeHangul(answer).length);
 
     const countResult = await client.query<{ count: string }>("SELECT COUNT(*)::text AS count FROM attempts WHERE play_id = $1", [play.id]);
     const attemptCount = Number(countResult.rows[0].count);
@@ -323,13 +384,13 @@ export async function getRoomSnapshot(code: string, anonymousSessionId: string):
       [session.id],
     ),
     pool.query<{
-      id: string; author_member_id: string; author_nickname: string; hint: string; jamo_length: number;
+      id: string; author_member_id: string; author_nickname: string; jamo_length: number;
       published_at: Date; locked_at: Date | null; started_count: string; solved_count: string;
       play_id: string | null; play_status: "active" | "solved" | "failed" | "expired" | null;
       play_started_at: Date | null; duration_ms: number | null;
       answer_ciphertext: string; answer_iv: string; answer_tag: string;
     }>(
-      `SELECT c.id, c.author_member_id, author.nickname AS author_nickname, c.hint, c.jamo_length,
+      `SELECT c.id, c.author_member_id, author.nickname AS author_nickname, c.jamo_length,
               c.published_at, c.locked_at,
               COUNT(all_plays.id)::text AS started_count,
               COUNT(all_plays.id) FILTER (WHERE all_plays.status = 'solved')::text AS solved_count,
@@ -393,15 +454,14 @@ export async function getRoomSnapshot(code: string, anonymousSessionId: string):
     const isOwn = challenge.author_member_id === current.id;
     const terminal = challenge.play_status && challenge.play_status !== "active";
     const canReveal = isOwn || terminal;
-    const answer = canReveal
-      ? decryptValue({ ciphertext: challenge.answer_ciphertext, iv: challenge.answer_iv, tag: challenge.answer_tag })
-      : undefined;
+    // 정답 자체는 볼 수 있는 사람에게만 내려보내지만, 칸 수는 항상 정답에서 다시 셉니다.
+    const decrypted = decryptValue({ ciphertext: challenge.answer_ciphertext, iv: challenge.answer_iv, tag: challenge.answer_tag });
+    const answer = canReveal ? decrypted : undefined;
     return {
       id: challenge.id,
       authorMemberId: challenge.author_member_id,
       authorNickname: challenge.author_nickname,
-      hint: challenge.hint,
-      jamoLength: challenge.jamo_length,
+      jamoLength: decomposeHangul(decrypted).length,
       publishedAt: challenge.published_at.toISOString(),
       locked: Boolean(challenge.locked_at),
       isOwn,

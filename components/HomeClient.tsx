@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { apiFetch } from "@/lib/client-api";
 import { Brand } from "./Brand";
 
@@ -11,6 +12,7 @@ export function HomeClient() {
   const router = useRouter();
   const [mode, setMode] = useState<Mode>("create");
   const [nickname, setNickname] = useState("");
+  const [pin, setPin] = useState("");
   const [code, setCode] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
@@ -26,11 +28,12 @@ export function HomeClient() {
     try {
       const cleanNickname = nickname.trim();
       if (!cleanNickname) throw new Error("닉네임을 입력해 주세요.");
+      if (!/^\d{4}$/.test(pin)) throw new Error("재입장 비밀번호를 숫자 4자리로 입력해 주세요.");
       window.localStorage.setItem("harumal_nickname", cleanNickname);
       if (mode === "create") {
         const room = await apiFetch<{ code: string }>("/api/rooms", {
           method: "POST",
-          body: JSON.stringify({ nickname: cleanNickname }),
+          body: JSON.stringify({ nickname: cleanNickname, pin }),
         });
         router.push(`/r/${room.code}`);
       } else {
@@ -38,7 +41,7 @@ export function HomeClient() {
         if (cleanCode.length !== 6) throw new Error("6자리 초대코드를 입력해 주세요.");
         await apiFetch(`/api/rooms/${cleanCode}/join`, {
           method: "POST",
-          body: JSON.stringify({ nickname: cleanNickname }),
+          body: JSON.stringify({ nickname: cleanNickname, pin }),
         });
         router.push(`/r/${cleanCode}`);
       }
@@ -89,6 +92,19 @@ export function HomeClient() {
             <label htmlFor="nickname">내 닉네임</label>
             <input id="nickname" value={nickname} onChange={(event) => setNickname(event.target.value.slice(0, 12))} placeholder="예: 단어왕민지" autoComplete="nickname" />
 
+            <label htmlFor="pin">재입장 비밀번호 <em>숫자 4자리</em></label>
+            <input
+              id="pin"
+              className="pinInput"
+              value={pin}
+              onChange={(event) => setPin(event.target.value.replace(/\D/g, "").slice(0, 4))}
+              placeholder="0000"
+              inputMode="numeric"
+              autoComplete="off"
+              maxLength={4}
+            />
+            <p className="fieldHelp">창을 닫거나 다른 브라우저에서 다시 들어올 때, 같은 닉네임과 이 번호로 내 자리를 이어받습니다.</p>
+
             {mode === "join" && (
               <>
                 <label htmlFor="room-code">6자리 초대코드</label>
@@ -101,13 +117,21 @@ export function HomeClient() {
               <span>{loading ? "잠시만요…" : mode === "create" ? "방 만들기" : "참가하기"}</span><b>→</b>
             </button>
           </form>
+
+          <div className="soloEntry">
+            <p>혼자서도 풀 수 있어요</p>
+            <div>
+              <Link href="/daily">오늘의 단어 <b>→</b></Link>
+              <Link href="/practice">연습 모드 <b>→</b></Link>
+            </div>
+          </div>
         </div>
       </section>
 
       <section className="homeHow">
         <p className="sectionLabel">HOW IT WORKS</p>
         <div className="howGrid">
-          <article><span>01</span><h3>각자 하나씩 출제</h3><p>문제와 힌트를 등록하면 친구들의 문제 목록에 실시간으로 나타나요.</p></article>
+          <article><span>01</span><h3>각자 하나씩 출제</h3><p>단어를 하나 등록하면 친구들의 문제 목록에 실시간으로 나타나요.</p></article>
           <article><span>02</span><h3>자모 단서로 추리</h3><p><b>사진</b>은 <b>ㅅ ㅏ ㅈ ㅣ ㄴ</b>. 초록·노랑·검정 단서로 다섯 번 안에 맞혀요.</p></article>
           <article><span>03</span><h3>오늘의 순위 완성</h3><p>정답 수, 시도 횟수, 풀이 시간을 합쳐 23:59에 최종 순위를 정해요.</p></article>
         </div>
