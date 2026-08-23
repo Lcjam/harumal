@@ -108,29 +108,80 @@ npm run test:e2e
 
 ## 배포
 
-[enjoylcjworld.com](https://enjoylcjworld.com)에서 돌아가고 있습니다. Oracle Cloud 프리티어 인스턴스에 Docker Compose로 올렸습니다.
+[enjoylcjworld.com](https://enjoylcjworld.com)은 Oracle Cloud의 ARM64 인스턴스에서 Docker Compose로 운영합니다. GitHub Actions로 자동 배포하지 않고, 로컬에서 확인한 코드를 SSH로 서버에 복사한 뒤 서버에서 이미지를 다시 빌드합니다.
 
-```bash
-docker compose up -d --build
-```
-
-운영 환경에서는 `.env`의 예시 값을 그대로 쓰지 말고 새로 생성해야 합니다.
+서버에는 프로젝트가 `/opt/harumal`에 있고 운영용 `.env`는 서버에만 둡니다. 처음 준비할 때는 예시 값을 그대로 쓰지 말고 비밀값을 새로 만든 뒤 권한을 잠급니다.
 
 ```bash
 openssl rand -hex 32  # APP_SECRET
 openssl rand -hex 24  # POSTGRES_PASSWORD
+chmod 600 .env
 ```
 
-`.env`와 `backups/`는 Git에서 제외되어 있습니다. 카카오 JavaScript 키가 있으면 카카오톡 공유를 사용하고, 키가 없으면 기본 공유 기능이나 클립보드 복사로 동작합니다.
-
-GitHub에 코드를 올리는 것만으로 배포가 시작되지는 않습니다. 배포 워크플로는 Actions 화면에서 직접 실행해야 동작합니다.
-
-백업과 복구 명령은 다음과 같습니다.
+재배포 전에는 로컬에서 테스트와 빌드를 먼저 확인합니다.
 
 ```bash
-npm run db:backup
-npm run db:restore -- backups/harumal-YYYYMMDD-HHMMSS.sql.gz
+npm test
+npm run typecheck
+npm run build
+npm run test:integration
 ```
+
+아래 예시의 접속 주소와 키 경로는 각자 사용하는 서버에 맞게 바꿉니다.
+
+```bash
+DEPLOY_HOST=ubuntu@server.example.com
+DEPLOY_KEY=/path/to/private.key
+```
+
+먼저 운영 데이터베이스를 백업합니다.
+
+```bash
+ssh -i "$DEPLOY_KEY" "$DEPLOY_HOST" \
+  'cd /opt/harumal && sudo sh scripts/backup.sh'
+```
+
+그다음 운영 설정과 데이터는 건드리지 않고 소스만 전송합니다.
+
+```bash
+rsync -az --delete \
+  --exclude '.git/' \
+  --exclude '.env' \
+  --exclude '.env.*' \
+  --exclude '.claude/' \
+  --exclude 'node_modules/' \
+  --exclude '.next/' \
+  --exclude 'coverage/' \
+  --exclude 'backups/' \
+  --exclude '*.tsbuildinfo' \
+  -e "ssh -i $DEPLOY_KEY" \
+  ./ "$DEPLOY_HOST:/opt/harumal/"
+```
+
+전송이 끝나면 서버에서 배포 스크립트를 실행합니다.
+
+```bash
+ssh -i "$DEPLOY_KEY" "$DEPLOY_HOST" \
+  'cd /opt/harumal && sh scripts/deploy.sh --no-pull'
+```
+
+`deploy.sh`는 앱, PostgreSQL, HTTPS 게이트웨이 이미지를 다시 빌드하고 컨테이너를 교체합니다. 앱이 시작될 때 아직 적용하지 않은 SQL 마이그레이션을 먼저 실행하며, `/api/health`가 정상 응답해야 배포가 끝납니다. 단일 서버라 컨테이너가 바뀌는 동안에는 짧게 접속이 끊길 수 있습니다.
+
+PostgreSQL 데이터와 HTTPS 인증서는 Docker 볼륨에 저장됩니다. `.env`와 `backups/`도 전송 대상에서 제외하므로 재배포해도 유지됩니다.
+
+배포 뒤에는 컨테이너 상태와 외부 응답을 확인합니다.
+
+```bash
+ssh -i "$DEPLOY_KEY" "$DEPLOY_HOST" \
+  'cd /opt/harumal && docker compose ps && docker compose logs --tail=80 app gateway'
+
+curl https://enjoylcjworld.com/api/health
+curl -I https://enjoylcjworld.com/
+```
+
+백업을 복구해야 할 때는 서버에서 `sh scripts/restore.sh backups/파일명.sql.gz`를 실행합니다. 현재 데이터베이스를 교체하는 명령이라 확인 문구로 `RESTORE`를 직접 입력해야 진행됩니다.
+
+카카오 JavaScript 키가 있으면 카카오톡 공유를 사용하고, 키가 없으면 기본 공유 기능이나 클립보드 복사로 동작합니다.
 
 ## 사용한 자료
 

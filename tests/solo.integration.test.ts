@@ -107,6 +107,17 @@ test("암호화 키가 달라 읽을 수 없는 오늘 기록은 새 문제로 �
   }
 });
 
+test("solo_plays에는 더 이상 사용하지 않는 hint 열이 남아 있지 않다", { skip: !enabled }, async () => {
+  const result = await pool.query<{ exists: boolean }>(
+    `SELECT EXISTS (
+       SELECT 1
+       FROM information_schema.columns
+       WHERE table_schema = 'public' AND table_name = 'solo_plays' AND column_name = 'hint'
+     ) AS exists`,
+  );
+  assert.equal(result.rows[0].exists, false);
+});
+
 test("풀이는 본인 기기만, 다섯 번까지만 제출할 수 있다", { skip: !enabled }, async () => {
   const deviceId = await createDevice();
   const intruderId = await createDevice();
