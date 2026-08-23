@@ -56,7 +56,10 @@ export function HomeClient() {
     <main className="homePage">
       <header className="siteHeader">
         <Brand />
-        <span className="dateChip">오늘 23:59까지</span>
+        <div className="wordHeaderActions">
+          <Link className="allGamesLink" href="/">게임 모음</Link>
+          <span className="dateChip">오늘 23:59까지</span>
+        </div>
       </header>
 
       <section className="homeHero">

@@ -232,7 +232,7 @@ export function RoomClient({ code }: { code: string }) {
 
   if (error && !publicRoom) {
     return (
-      <main className="statePage"><Brand /><section><span>!</span><h1>방을 열 수 없어요.</h1><p>{error}</p><button className="primaryButton" onClick={() => router.push("/")}>처음으로</button></section></main>
+      <main className="statePage"><Brand /><section><span>!</span><h1>방을 열 수 없어요.</h1><p>{error}</p><button className="primaryButton" onClick={() => router.push("/word")}>처음으로</button></section></main>
     );
   }
 

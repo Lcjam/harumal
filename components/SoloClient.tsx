@@ -141,7 +141,7 @@ export function SoloClient({ mode }: { mode: Mode }) {
           <span>!</span>
           <h1>문제를 열 수 없어요.</h1>
           <p>{error}</p>
-          <button className="primaryButton" onClick={() => router.push("/")}>처음으로</button>
+          <button className="primaryButton" onClick={() => router.push("/word")}>처음으로</button>
         </section>
       </main>
     );
@@ -155,7 +155,7 @@ export function SoloClient({ mode }: { mode: Mode }) {
     <main className="soloPage">
       <section className="puzzlePanel">
         <header>
-          <button onClick={() => router.push("/")} aria-label="처음 화면으로">← <span>홈으로</span></button>
+          <button onClick={() => router.push("/word")} aria-label="하루말 처음 화면으로">← <span>홈으로</span></button>
           <div>
             <small>{mode === "daily" ? "오늘의 단어" : "연습 모드"}</small>
             <b>{play.attempts.length} / 5</b>
@@ -239,7 +239,7 @@ export function SoloClient({ mode }: { mode: Mode }) {
             {mode === "daily"
               ? <Link href="/practice">연습 모드로 계속 풀기 →</Link>
               : <Link href="/daily">오늘의 단어 풀러 가기 →</Link>}
-            <Link href="/">친구들과 방에서 하기 →</Link>
+            <Link href="/word">친구들과 방에서 하기 →</Link>
           </div>
         </div>
 
