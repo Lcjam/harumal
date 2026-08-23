@@ -1,0 +1,480 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>오늘의 단어 서버 오류 — 원인 분석과 수정 기록</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --paper: #f7f3e9;
+      --ink: #17211b;
+      --muted: #667068;
+      --line: #d8d7ca;
+      --green: #1e6b4d;
+      --green-soft: #dceade;
+      --yellow: #f0c85a;
+      --red: #a44736;
+      --red-soft: #f5e4df;
+      --white: #fffef9;
+      --shadow: 0 18px 50px rgba(35, 48, 39, .10);
+    }
+
+    * { box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 12% 8%, rgba(240, 200, 90, .23), transparent 24rem),
+        linear-gradient(180deg, #f4f1e6 0, var(--paper) 28rem);
+      font-family: Pretendard, "Noto Sans KR", "Apple SD Gothic Neo", system-ui, sans-serif;
+      line-height: 1.65;
+    }
+
+    a { color: inherit; }
+
+    code {
+      padding: .12rem .38rem;
+      border-radius: .35rem;
+      color: #164d39;
+      background: #e8eee8;
+      font: .92em ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    .wrap {
+      width: min(1120px, calc(100% - 36px));
+      margin: 0 auto;
+    }
+
+    .hero {
+      padding: 72px 0 44px;
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: .55rem;
+      margin: 0 0 1.2rem;
+      color: var(--green);
+      font-size: .82rem;
+      font-weight: 800;
+      letter-spacing: .12em;
+      text-transform: uppercase;
+    }
+
+    .eyebrow::before {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: var(--green);
+      content: "";
+      box-shadow: 0 0 0 6px rgba(30, 107, 77, .12);
+    }
+
+    h1 {
+      max-width: 850px;
+      margin: 0;
+      font-size: clamp(2.35rem, 7vw, 5.5rem);
+      font-weight: 850;
+      letter-spacing: -.065em;
+      line-height: .98;
+    }
+
+    .lede {
+      max-width: 760px;
+      margin: 1.8rem 0 0;
+      color: #3e4942;
+      font-size: clamp(1.05rem, 2vw, 1.32rem);
+    }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: .65rem;
+      margin-top: 2rem;
+    }
+
+    .pill {
+      padding: .5rem .8rem;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: rgba(255, 254, 249, .72);
+      color: #4d5850;
+      font-size: .82rem;
+      font-weight: 700;
+    }
+
+    .pill.ok {
+      border-color: #aac7b2;
+      color: var(--green);
+      background: var(--green-soft);
+    }
+
+    main { padding-bottom: 80px; }
+
+    .summary {
+      display: grid;
+      grid-template-columns: 1.25fr .75fr;
+      gap: 1px;
+      overflow: hidden;
+      margin: 10px 0 56px;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: var(--line);
+      box-shadow: var(--shadow);
+    }
+
+    .summary > div {
+      padding: clamp(26px, 5vw, 46px);
+      background: var(--white);
+    }
+
+    .summary .verdict { background: var(--green); color: white; }
+    .summary h2 { margin-top: 0; }
+    .summary p:last-child { margin-bottom: 0; }
+    .summary .verdict small { color: #cce2d6; }
+    .summary .verdict strong { display: block; margin: .5rem 0 1rem; font-size: 1.65rem; line-height: 1.25; }
+
+    section { margin-top: 62px; }
+
+    .section-label {
+      margin: 0 0 .25rem;
+      color: var(--green);
+      font: 800 .78rem ui-monospace, SFMono-Regular, Menlo, monospace;
+      letter-spacing: .09em;
+    }
+
+    h2 {
+      margin: 0 0 1.5rem;
+      font-size: clamp(1.65rem, 4vw, 2.55rem);
+      letter-spacing: -.045em;
+      line-height: 1.12;
+    }
+
+    h3 { margin: 0; font-size: 1.08rem; }
+
+    .evidence-grid,
+    .fix-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .card {
+      padding: 24px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: rgba(255, 254, 249, .76);
+    }
+
+    .card .number {
+      display: block;
+      margin-bottom: .7rem;
+      color: var(--green);
+      font: 800 .82rem ui-monospace, SFMono-Regular, Menlo, monospace;
+    }
+
+    .card p { margin: .6rem 0 0; color: var(--muted); }
+    .card.error { border-color: #dcb8ae; background: var(--red-soft); }
+    .card.error .number { color: var(--red); }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      align-items: stretch;
+      gap: 10px;
+      margin-top: 24px;
+    }
+
+    .flow div {
+      position: relative;
+      min-height: 122px;
+      padding: 19px 17px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--white);
+    }
+
+    .flow div:not(:last-child)::after {
+      position: absolute;
+      top: 50%;
+      right: -10px;
+      z-index: 2;
+      width: 10px;
+      height: 2px;
+      background: var(--green);
+      content: "";
+    }
+
+    .flow b { display: block; margin-bottom: .35rem; color: var(--green); font-size: .92rem; }
+    .flow span { color: var(--muted); font-size: .84rem; line-height: 1.45; }
+    .flow .break { border-color: #d3998b; background: var(--red-soft); }
+    .flow .break b { color: var(--red); }
+
+    .choice-table {
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--white);
+      font-size: .92rem;
+    }
+
+    .choice-table th,
+    .choice-table td {
+      padding: 18px;
+      border-right: 1px solid var(--line);
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }
+
+    .choice-table th:last-child,
+    .choice-table td:last-child { border-right: 0; }
+    .choice-table tr:last-child td { border-bottom: 0; }
+    .choice-table thead th { color: #425047; background: #efeee6; font-size: .8rem; }
+    .choice-table td:first-child { width: 24%; font-weight: 800; }
+    .choice-table .selected td { background: #eef6ef; }
+    .tag { display: inline-block; margin-top: .5rem; padding: .2rem .45rem; border-radius: .35rem; color: white; background: var(--green); font-size: .7rem; }
+
+    .checklist {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      padding: 0;
+      list-style: none;
+    }
+
+    .checklist li {
+      min-height: 132px;
+      padding: 22px;
+      border-radius: 14px;
+      color: #143f30;
+      background: var(--green-soft);
+    }
+
+    .checklist b { display: block; margin-bottom: .5rem; }
+    .checklist span { color: #426153; font-size: .9rem; }
+
+    .note {
+      margin-top: 18px;
+      padding: 18px 20px;
+      border-left: 4px solid var(--yellow);
+      background: #fff8df;
+      color: #5d5029;
+    }
+
+    .files {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+    }
+
+    .file {
+      display: block;
+      padding: 20px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      background: var(--white);
+      text-decoration: none;
+    }
+
+    .file:hover { border-color: #86ac92; transform: translateY(-1px); }
+    .file code { display: inline-block; margin-bottom: .55rem; }
+    .file span { display: block; color: var(--muted); font-size: .85rem; }
+
+    footer {
+      padding: 28px 0 42px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: .82rem;
+    }
+
+    @media (max-width: 820px) {
+      .summary,
+      .evidence-grid,
+      .fix-grid { grid-template-columns: 1fr; }
+      .flow { grid-template-columns: 1fr; }
+      .flow div { min-height: 0; }
+      .flow div:not(:last-child)::after { top: auto; right: 50%; bottom: -10px; width: 2px; height: 10px; }
+      .checklist,
+      .files { grid-template-columns: 1fr; }
+      .table-scroll { overflow-x: auto; }
+      .choice-table { min-width: 760px; }
+    }
+  </style>
+</head>
+<body>
+  <header class="hero wrap">
+    <p class="eyebrow">Incident review · 2026-08-23</p>
+    <h1>오늘의 단어<br>서버 오류</h1>
+    <p class="lede">화면 코드는 배포됐지만 그 코드가 기대하는 데이터베이스 변경이 적용되지 않아 발생한 코드–스키마 불일치 장애를 분석하고, 실행 경로 자체에서 재발하지 않도록 고친 기록입니다.</p>
+    <div class="meta">
+      <span class="pill ok">소스 수정 완료</span>
+      <span class="pill">영향: /daily, /practice</span>
+      <span class="pill">원인 유형: 배포·마이그레이션</span>
+      <span class="pill">운영 반영: 재배포 필요</span>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <article class="summary">
+      <div>
+        <h2>한 문장 요약</h2>
+        <p>새 혼자 하기 기능은 <code>solo_plays</code>와 <code>solo_attempts</code> 테이블을 필요로 하지만, 직접 실행 경로인 <code>npm start</code>가 마이그레이션을 건너뛰고 <code>server/index.ts</code>만 실행했습니다. 새 코드만 반영된 운영 서버에서는 해당 테이블을 쓰는 요청이 모두 500이 됐습니다.</p>
+      </div>
+      <div class="verdict">
+        <small>선택한 해결책</small>
+        <strong>서버 시작 전에 마이그레이션을 항상 실행한다.</strong>
+        <p><code>npm start</code>와 Docker 모두 같은 시작 스크립트를 거치도록 통일했습니다.</p>
+      </div>
+    </article>
+
+    <section aria-labelledby="evidence-title">
+      <p class="section-label">01 / EVIDENCE</p>
+      <h2 id="evidence-title">어떻게 원인을 좁혔나</h2>
+      <div class="evidence-grid">
+        <div class="card error">
+          <span class="number">HTTP 500</span>
+          <h3>운영 `/daily` 재현</h3>
+          <p>Chrome에서 실제 화면을 열었을 때 “서버 오류가 발생했습니다”가 표시됐고, 쿠키가 없는 새 요청의 <code>GET /api/daily</code>도 500이었습니다. 기존 사용자 데이터 손상 문제를 제외했습니다.</p>
+        </div>
+        <div class="card error">
+          <span class="number">HTTP 500</span>
+          <h3>연습 모드도 같은 실패</h3>
+          <p><code>POST /api/practice</code>도 동일하게 실패했습니다. 둘의 공통점은 새로 추가된 solo 테이블을 사용한다는 점입니다.</p>
+        </div>
+        <div class="card">
+          <span class="number">HTTP 200</span>
+          <h3>DB 연결 자체는 정상</h3>
+          <p><code>GET /api/health</code>는 200이었고 익명 세션 쿠키도 발급됐습니다. PostgreSQL 전체 장애나 네트워크 장애는 아니었습니다.</p>
+        </div>
+        <div class="card">
+          <span class="number">DEPLOY GAP</span>
+          <h3>배포 경로 불일치 발견</h3>
+          <p>Docker의 시작 명령은 마이그레이션을 실행하지만 기존 <code>npm start</code>는 서버만 실행했습니다. GitHub Actions의 실제 deploy 작업도 runner 대기 후 취소돼 자동 배포가 완료되지 않았습니다.</p>
+        </div>
+      </div>
+    </section>
+
+    <section aria-labelledby="cause-title">
+      <p class="section-label">02 / ROOT CAUSE</p>
+      <h2 id="cause-title">실패가 만들어진 흐름</h2>
+      <div class="flow" aria-label="코드와 데이터베이스 스키마가 어긋나는 과정">
+        <div><b>기능 코드 추가</b><span>오늘의 단어와 연습 모드가 solo 테이블을 조회·삽입</span></div>
+        <div><b>Migration 003</b><span><code>solo_plays</code>, <code>solo_attempts</code> 정의</span></div>
+        <div class="break"><b>npm start</b><span>마이그레이션 없이 Express/Next 서버만 시작</span></div>
+        <div class="break"><b>스키마 불일치</b><span>실행 코드는 새 테이블을 기대하지만 운영 DB에는 미반영</span></div>
+        <div class="break"><b>API 500</b><span>공통 오류 처리기가 내부 DB 오류를 서버 오류로 응답</span></div>
+      </div>
+      <p class="note"><strong>암호화 키 손상은 이번 원인이 아닙니다.</strong> 해당 복구 로직은 기존 daily 행을 읽은 뒤에 동작합니다. 이번에는 새 세션의 daily와 practice가 함께 실패했으므로 그보다 앞선 공통 DB 스키마 경로가 원인입니다.</p>
+    </section>
+
+    <section aria-labelledby="fix-title">
+      <p class="section-label">03 / FIX</p>
+      <h2 id="fix-title">적용한 수정</h2>
+      <div class="fix-grid">
+        <div class="card">
+          <span class="number">PACKAGE START</span>
+          <h3>시작 진입점 통일</h3>
+          <p><code>npm start</code>가 <code>server/index.ts</code>를 직접 실행하지 않고 <code>scripts/start.ts</code>를 실행하도록 변경했습니다. 이 스크립트는 마이그레이션 성공 후에만 서버를 띄웁니다.</p>
+        </div>
+        <div class="card">
+          <span class="number">DATABASE URL</span>
+          <h3>두 실행 환경 모두 지원</h3>
+          <p>일반 실행에서는 이미 설정된 <code>DATABASE_URL</code>을 보존하고, Docker에서는 기존처럼 <code>APP_SECRET</code>으로 최소 권한 앱 계정 접속 주소를 만듭니다.</p>
+        </div>
+        <div class="card">
+          <span class="number">FAIL FAST</span>
+          <h3>마이그레이션 실패 시 서버 중단</h3>
+          <p>스키마 변경이 실패하면 API 서버를 반쪽 상태로 열지 않습니다. 장애가 사용자 요청 시점의 모호한 500이 아니라 시작 로그의 명확한 실패로 드러납니다.</p>
+        </div>
+        <div class="card">
+          <span class="number">REGRESSION TEST</span>
+          <h3>시작 계약 고정</h3>
+          <p>시작 명령이 공통 스크립트를 사용하는지, 외부 DB URL 보존과 Docker용 URL 생성이 각각 유지되는지 자동 테스트를 추가했습니다.</p>
+        </div>
+      </div>
+    </section>
+
+    <section aria-labelledby="options-title">
+      <p class="section-label">04 / DECISION</p>
+      <h2 id="options-title">가능한 해결책과 선택 이유</h2>
+      <div class="table-scroll">
+        <table class="choice-table">
+          <thead>
+            <tr>
+              <th>선택지</th>
+              <th>장점</th>
+              <th>단점</th>
+              <th>판단</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr class="selected">
+              <td>시작 시 자동 마이그레이션 <span class="tag">선택</span></td>
+              <td>모든 기동 경로가 같은 스키마를 보장합니다. 현재 단일 인스턴스 구조에서 운영이 단순하고, 누락된 Migration 003도 재배포만으로 적용됩니다.</td>
+              <td>시작 시간이 조금 늘고, 장시간 잠금을 잡는 대형 마이그레이션은 별도 운영 전략이 필요합니다.</td>
+              <td>현재 규모와 배포 방식에 가장 직접적이며 재발 방지 효과가 큽니다.</td>
+            </tr>
+            <tr>
+              <td>배포 전에 수동 실행</td>
+              <td>스키마 변경 시점과 앱 전환 시점을 운영자가 세밀하게 제어할 수 있습니다.</td>
+              <td>명령 한 번을 빠뜨리면 이번과 같은 장애가 그대로 반복됩니다. 실행 경로가 둘로 나뉩니다.</td>
+              <td>규모가 커져 별도 DBA 절차가 필요할 때는 적합하지만 현재 장애 원인을 제거하지 못합니다.</td>
+            </tr>
+            <tr>
+              <td>API 요청 중 테이블 생성</td>
+              <td>요청 시 즉시 자가 복구하는 것처럼 보입니다.</td>
+              <td>요청 경로에서 DDL이 실행되고 동시성·권한·지연 문제가 생기며 배포 문제를 숨깁니다.</td>
+              <td>사용자 요청과 스키마 관리를 섞으므로 제외했습니다.</td>
+            </tr>
+            <tr>
+              <td>오류 메시지만 개선</td>
+              <td>진단은 쉬워지고 사용자에게 일시 장애임을 더 잘 안내할 수 있습니다.</td>
+              <td>기능은 계속 고장 난 상태이고 DB 내부 정보 노출 위험도 관리해야 합니다.</td>
+              <td>관측성 보완책일 뿐 근본 해결책이 아니므로 단독 선택하지 않았습니다.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section aria-labelledby="verify-title">
+      <p class="section-label">05 / VERIFICATION</p>
+      <h2 id="verify-title">수정 확인 결과</h2>
+      <ul class="checklist">
+        <li><b>빈 DB 기동</b><span><code>npm start</code>가 Migration 001~005를 순서대로 자동 적용했습니다.</span></li>
+        <li><b>오늘의 단어 200</b><span>새 서버의 <code>GET /api/daily</code>가 활성 daily 문제와 통계를 정상 반환했습니다.</span></li>
+        <li><b>정답 비공개 유지</b><span>진행 중 응답에 <code>answer</code> 필드가 없음을 함께 확인했습니다.</span></li>
+        <li><b>단위 테스트</b><span>시작 경로 회귀 테스트를 포함한 전체 테스트가 통과했습니다.</span></li>
+        <li><b>통합 테스트</b><span>daily 생성·통계·암호화 키 복구를 포함한 PostgreSQL 테스트가 통과했습니다.</span></li>
+        <li><b>정적 검증</b><span>TypeScript 타입 검사와 프로덕션 빌드를 검증 대상으로 포함했습니다.</span></li>
+      </ul>
+      <p class="note"><strong>운영 반영 시점:</strong> 이 수정이 Oracle Cloud에 재배포되어 새 시작 스크립트가 한 번 실행되면 누락된 스키마가 적용됩니다. 배포 전까지 현재 운영 URL의 500은 그대로일 수 있습니다.</p>
+    </section>
+
+    <section aria-labelledby="files-title">
+      <p class="section-label">06 / CHANGED FILES</p>
+      <h2 id="files-title">관련 파일</h2>
+      <div class="files">
+        <a class="file" href="../package.json"><code>package.json</code><span>npm start 진입점을 공통 시작 스크립트로 변경</span></a>
+        <a class="file" href="../scripts/start.ts"><code>scripts/start.ts</code><span>마이그레이션 완료 후 서버를 시작하는 실행 흐름</span></a>
+        <a class="file" href="../scripts/runtime-database.ts"><code>scripts/runtime-database.ts</code><span>일반 실행과 Docker의 DB URL 결정 로직 분리</span></a>
+        <a class="file" href="../tests/startup.test.ts"><code>tests/startup.test.ts</code><span>시작·DB 접속 결정 계약에 대한 회귀 테스트</span></a>
+        <a class="file" href="../migrations/003_solo_play.sql"><code>migrations/003_solo_play.sql</code><span>이번에 누락되어 solo API가 실패한 스키마 정의</span></a>
+        <a class="file" href="../server/solo-service.ts"><code>server/solo-service.ts</code><span>daily와 practice가 공통으로 solo 테이블을 사용하는 서비스</span></a>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">하루말 운영 장애 기록 · 오늘의 단어 / 연습 모드 · 2026-08-23</div>
+  </footer>
+</body>
+</html>

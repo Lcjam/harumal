@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "NODE_ENV=development tsx watch server/index.ts",
     "build": "next build --webpack",
-    "start": "NODE_ENV=production node --import tsx server/index.ts",
+    "start": "NODE_ENV=production node --import tsx scripts/start.ts",
     "typecheck": "next typegen && tsc --noEmit",
     "test": "node --import tsx --test tests/**/*.test.ts",
     "test:integration": "RUN_INTEGRATION=1 node --import tsx --test tests/*.integration.test.ts",
