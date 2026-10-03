@@ -20,6 +20,15 @@ import (
 
 const upstreamAddress = "http://app:3000"
 
+// CrewDeal is a separate stack on the same VM. Its app container joins the frontend network
+// under this alias; set CREWDEAL_HOST to route that hostname to it. Empty keeps the gateway
+// single-site.
+const defaultCrewDealUpstream = "http://crewdeal-app:8080"
+
+func crewDealHost() string {
+	return strings.ToLower(strings.TrimSpace(os.Getenv("CREWDEAL_HOST")))
+}
+
 func siteURL() (*url.URL, error) {
 	raw := strings.TrimSpace(os.Getenv("SITE_ADDRESS"))
 	if raw == "" {
@@ -41,13 +50,13 @@ func siteURL() (*url.URL, error) {
 	return parsed, nil
 }
 
-func gatewayHandler(site *url.URL) http.Handler {
-	upstream, err := url.Parse(upstreamAddress)
+func newProxy(site *url.URL, upstreamRaw string, cacheNextAssets bool) *httputil.ReverseProxy {
+	upstream, err := url.Parse(upstreamRaw)
 	if err != nil {
 		panic(err)
 	}
 
-	proxy := &httputil.ReverseProxy{
+	return &httputil.ReverseProxy{
 		Rewrite: func(request *httputil.ProxyRequest) {
 			request.Out.Header.Del("Forwarded")
 			request.Out.Header.Del("X-Forwarded-For")
@@ -72,16 +81,33 @@ func gatewayHandler(site *url.URL) http.Handler {
 				response.Header.Del("Strict-Transport-Security")
 			}
 			path := response.Request.URL.Path
-			if strings.HasPrefix(path, "/_next/static/") || path == "/favicon.svg" || path == "/og.png" {
+			if cacheNextAssets && (strings.HasPrefix(path, "/_next/static/") || path == "/favicon.svg" || path == "/og.png") {
 				response.Header.Set("Cache-Control", "public, max-age=31536000, immutable")
 			}
 			return nil
 		},
 	}
+}
+
+func gatewayHandler(site *url.URL) http.Handler {
+	proxy := newProxy(site, upstreamAddress, true)
+
+	crewHost := crewDealHost()
+	var crewProxy *httputil.ReverseProxy
+	if crewHost != "" {
+		upstream := strings.TrimSpace(os.Getenv("CREWDEAL_UPSTREAM"))
+		if upstream == "" {
+			upstream = defaultCrewDealUpstream
+		}
+		crewProxy = newProxy(site, upstream, false)
+	}
 
 	expectedHost := site.Host
 	return http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-		if !strings.EqualFold(request.Host, expectedHost) {
+		target := proxy
+		if crewProxy != nil && strings.EqualFold(hostWithoutPort(request.Host), crewHost) {
+			target = crewProxy
+		} else if !strings.EqualFold(request.Host, expectedHost) {
 			http.Error(response, "Misdirected request", http.StatusMisdirectedRequest)
 			return
 		}
@@ -90,9 +116,21 @@ func gatewayHandler(site *url.URL) http.Handler {
 			http.Error(response, "Method not allowed", http.StatusMethodNotAllowed)
 			return
 		}
+		// CrewDeal has no page at "/" (every API needs a session), so send visitors to its console.
+		if target == crewProxy && request.URL.Path == "/" {
+			http.Redirect(response, request, "/console/index.html", http.StatusFound)
+			return
+		}
 
-		proxy.ServeHTTP(response, request)
+		target.ServeHTTP(response, request)
 	})
+}
+
+func hostWithoutPort(host string) string {
+	if index := strings.LastIndex(host, ":"); index != -1 && !strings.Contains(host[index:], "]") {
+		return host[:index]
+	}
+	return host
 }
 
 func server(address string, handler http.Handler) *http.Server {
@@ -126,14 +164,22 @@ func main() {
 		servers = append(servers, httpServer)
 		go func() { errorsChannel <- httpServer.ListenAndServe() }()
 	} else {
+		hosts := []string{site.Hostname()}
+		if crewHost := crewDealHost(); crewHost != "" {
+			hosts = append(hosts, crewHost)
+		}
 		manager := &autocert.Manager{
 			Prompt:     autocert.AcceptTOS,
-			HostPolicy: autocert.HostWhitelist(site.Hostname()),
+			HostPolicy: autocert.HostWhitelist(hosts...),
 			Cache:      autocert.DirCache("/data/certs"),
 			Email:      strings.TrimSpace(os.Getenv("ACME_EMAIL")),
 		}
 		httpServer := server(":80", manager.HTTPHandler(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
-			target := "https://" + site.Host + request.URL.RequestURI()
+			host := site.Host
+			if crewHost := crewDealHost(); crewHost != "" && strings.EqualFold(hostWithoutPort(request.Host), crewHost) {
+				host = crewHost
+			}
+			target := "https://" + host + request.URL.RequestURI()
 			http.Redirect(response, request, target, http.StatusPermanentRedirect)
 		})))
 		httpsServer := server(":443", handler)

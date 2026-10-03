@@ -148,6 +148,8 @@ services:
     environment:
       SITE_ADDRESS: ${SITE_ADDRESS:-http://localhost}
       ACME_EMAIL: ${ACME_EMAIL:-}
+      # Optional second site on this VM (CrewDeal). Its app joins the frontend network as crewdeal-app.
+      CREWDEAL_HOST: ${CREWDEAL_HOST:-}
     ports:
       - "80:80"
       - "443:443"

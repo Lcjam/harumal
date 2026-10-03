@@ -57,7 +57,7 @@ export function HomeClient() {
       <header className="siteHeader">
         <Brand />
         <div className="wordHeaderActions">
-          <Link className="allGamesLink" href="/">게임 모음</Link>
+          <Link className="allGamesLink" href="/games">게임 모음</Link>
           <span className="dateChip">오늘 23:59까지</span>
         </div>
       </header>
