@@ -75,6 +75,18 @@ button:disabled { opacity: .48; cursor: not-allowed; }
 .hubFooter b { font-size: 20px; letter-spacing: -.06em; }
 .hubFooter p { margin: 0; color: rgba(255,255,255,.65); text-align: center; font-size: 11px; }
 .hubFooter span { justify-self: end; color: var(--yellow); font-size: 9px; font-weight: 950; letter-spacing: .14em; }
+
+/* Landing */
+.landingPage { min-height: 100vh; overflow: hidden; background: var(--cream); }
+.landingShelf { min-height: calc(100vh - 198px); padding: 42px max(22px, calc((100vw - 1360px) / 2)) 64px; display: flex; align-items: flex-start; }
+.landingGrid { width: 100%; max-width: 920px; display: grid; grid-template-columns: repeat(2, minmax(250px, 1fr)); gap: 18px; align-items: stretch; }
+.landingGrid .gameCardBody h2 { margin: 0 0 10px; font-size: 28px; letter-spacing: -.055em; }
+.landingLead { margin: 0 0 20px; color: var(--ink-soft); font-size: 13px; line-height: 1.55; }
+.landingCardBackend { box-shadow: 8px 8px 0 var(--green); }
+.landingCardBackend .gameCardTopline b { background: var(--green); }
+.landingDealVisual { padding: 28px; align-content: center; gap: 8px; background: #d9f2e8; }
+.landingDealVisual span { min-width: 150px; padding: 10px 14px; background: var(--cream); border: 1px solid var(--ink); box-shadow: 3px 3px 0 var(--ink); text-align: center; font-size: 13px; font-weight: 950; }
+.landingDealVisual span:last-child { color: white; background: var(--green); }
 .wordHeaderActions { display: flex; align-items: center; gap: 9px; }
 .allGamesLink { padding: 8px 11px; color: var(--ink); border: 1px solid var(--ink); text-decoration: none; font-size: 11px; font-weight: 900; }
 .allGamesLink:hover { color: white; background: var(--ink); }
@@ -348,6 +360,13 @@ h1 em { color: var(--blue); font-style: normal; }
   .hubHeaderMeta > span { display: none; }
   .gameShelf { min-height: calc(100vh - 66px); padding: 14px 14px 28px; }
   .gameCardGrid { grid-template-columns: 1fr; gap: 11px; }
+  .landingShelf { min-height: calc(100vh - 66px); padding: 14px 14px 28px; }
+  .landingGrid { grid-template-columns: 1fr; gap: 11px; }
+  .landingGrid .gameCardBody h2 { margin: 0 0 6px; font-size: 23px; }
+  .landingLead { margin-bottom: 12px; font-size: 12px; }
+  .landingCardBackend { box-shadow: 3px 3px 0 var(--green); }
+  .landingDealVisual { padding: 0; }
+  .landingDealVisual > * { display: none; }
   .gameCard { min-height: 144px; display: grid; grid-template-columns: 98px minmax(0, 1fr); grid-template-rows: 31px 1fr; box-shadow: 3px 3px 0 var(--ink); }
   .gameCardFeatured { box-shadow: 3px 3px 0 var(--blue); }
   .gameCardTopline { grid-column: 1 / -1; min-height: 31px; padding: 0 10px; }
